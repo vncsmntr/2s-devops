@@ -1,0 +1,146 @@
+- hosts: all
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+    - name: Garantindo /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ item }}"
+      with_items:
+        - 192.168.99.10 zabbix zabbix.dexter.com.br
+        - 192.168.99.11 prometheus prometheus.dexter.com.br
+        - 192.168.99.12 4flix 4flix.dexter.com.br
+        - 192.168.99.13 graylog graylog.dexter.com.br
+
+    - name: Configura hostname da VM
+      hostname:
+        name: 4flix
+
+    - name: Adicionar usuario suporte
+      user:
+        name: suporte
+        shell: /bin/bash
+        password : $1$QbUARykG$p2nthVG8AkDvabKPHwboa1
+
+    - name: Instalando pacotes de dependencias para o curso
+      yum:
+        name: "{{ packages }}"
+        state: present
+        update_cache: yes
+      vars:
+        packages:
+        - epel-release
+        - python3
+        - python3-pip
+        - policycoreutils-python
+        - git
+        - wget
+        - vim
+        - net-tools
+        - unzip
+        - java-11-openjdk-devel
+
+    - name: Criando diretório apache-jmeter
+      synchronize:
+        src: files/apache-jmeter-5.2
+        dest: /root
+
+    - name: Download do arquivo docker-ce.repo
+      get_url:
+        url: https://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/docker-ce.repo
+        mode: 0644
+
+    - name: Instalando pacotes do Docker
+      yum:
+        name: "{{ packages }}"
+        state: present
+        update_cache: yes
+      vars:
+        packages:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+
+    - name: Iniciar servico do Docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Adiciona o usuario suporte no grupo docker
+      user:
+        name: suporte
+        group: docker
+
+    - name: Download do repositorio do Jenkins
+      get_url:
+        url: https://pkg.jenkins.io/redhat/jenkins.repo
+        dest: /etc/yum.repos.d/jenkins.repo
+        validate_certs: False
+      become: true
+
+    - name: Importar chave GPG do Jenkins
+      rpm_key:
+        state: present
+        key: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+        validate_certs: False
+
+    - name: Instalar o Jenkins
+      yum:
+        name: jenkins
+        state: present
+
+    - name: Iniciar servico do Jenkins
+      service:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Criando o arquivo sudo para o usuario jenkins
+      copy:
+        src: files/jenkins
+        dest: /etc/sudoers.d
+        mode: 0644
+
+    - name: Criando o arquivo mongodb-org-3.6.repo
+      copy:
+        src: files/mongodb-org-3.6.repo
+        dest: /etc/yum.repos.d
+        mode: 0644
+
+    - name: Instalar o mongodb-org-shell
+      yum:
+        name: mongodb-org-shell.x86_64
+        state: present
+
+    - name: Criando o arquivo get-pip.py
+      copy:
+        src: files/get-pip.py
+        dest: /tmp
+        mode: 0644
+
+    - name: Atualiza o pip com Python 3
+      shell: python3 get-pip.py
+      args:
+        chdir: /tmp
+
+    - name: Alterando arquivo do SELinux
+      lineinfile:
+          path: /etc/selinux/config
+          regexp: '^SELINUX='
+          line: 'SELINUX=disabled'
+
+    - name: Desabilitando o SELinux
+      command: setenforce 0
+
+    - name: Desabilitando o Firewall
+      command: systemctl disable firewalld
+
+    - name: Parando FirewallD
+      command: systemctl stop firewalld
+
+    - name: Atualiza o timezone
+      shell: timedatectl set-timezone America/Sao_Paulo
+      args:
